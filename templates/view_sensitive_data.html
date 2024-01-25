@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <h1>Twoje dane konta</h1>
+    <p><strong>Nazwa Użytkownika: </strong> {{ user.username }}</p>
+    <p><strong>Balans: </strong> {{ user.balance }} PLN</p>
+    <p><strong>Numer Konta: </strong> {{ user.account_number }}</p>
+    <p><strong>Numer Karty: </strong> {{ user.card_number }}</p>
+    <p><strong>Numer Dowodu: </strong> {{ user.id_number }}</p>
+    <p><strong>Ostatnie logowanie: </strong> {{ user.last_login.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+    <a href="{{ url_for('index') }}" class="button">Wróć do strony głównej</a>
+{% endblock %}

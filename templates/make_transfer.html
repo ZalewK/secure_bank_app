@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <h1>Wykonaj Przelew</h1>
+    <form class="form" method="post" action="{{ url_for('make_transfer') }}">
+        {{ form.hidden_tag() }}
+        <label for="amount">Kwota przelewu:</label>
+        {{ form.amount(class="form-control") }}
+        {% if form.amount.errors %}
+            <p class="error-message">{{ form.amount.errors[0] }}</p>
+        {% endif %}
+        <br>
+        <label for="title">Tytuł przelewu:</label>
+        {{ form.title(class="form-control") }}
+        {% if form.title.errors %}
+            <p class="error-message">{{ form.title.errors[0] }}</p>
+        {% endif %}
+        <br>
+        <label for="recipient_account_number">Numer konta odbiorcy:</label>
+        {{ form.recipient_account_number(class="form-control") }}
+        {% if form.recipient_account_number.errors %}
+            <p class="error-message">{{ form.recipient_account_number.errors[0] }}</p>
+        {% endif %}
+        <br>
+        {{ form.submit(class="button") }}
+    </form>
+    <br />
+    <a href="{{ url_for('index') }}" class="button">Wróć do strony głównej</a>
+{% endblock %}

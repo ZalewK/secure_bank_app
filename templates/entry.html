@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+
+{% block header %}Zaloguj się na stronę banku{% endblock %}
+
+{% block content %}
+    <form class="form" method="post" action="{{ url_for('entry') }}">
+        {{ form.hidden_tag() }}
+        <label for="username"><strong>Nazwa użytkownika:</strong></label>
+        {{ form.username(class="form-control") }}
+        {% if form.username.errors %}
+            <p class="error-message">{{ form.username.errors[0] }}</p>
+        {% endif %}
+        <br>
+        {{ form.submit(class="button") }}
+    </form>
+    {% if error %}
+        <p class="error-message">{{ error }}</p>
+    {% endif %}
+{% endblock %}
