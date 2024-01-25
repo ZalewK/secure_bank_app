@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block content %}
+    <h1>Witaj na stronie banku, {{user.username}}!</h1>
+    <a href="{{ url_for('make_transfer') }}" class="button">Wykonaj Przelew</a>
+    <a href="{{ url_for('view_transaction_list') }}" class="button">Zobacz Listę Przelewów</a>
+    <a href="{{ url_for('view_sensitive_data') }}" class="button">Zobacz Swoje Dane</a>
+{% endblock %}

@@ -1,26 +1,29 @@
+from datetime import timedelta
 import os
 from users import users_data
 from time import sleep
 from flask import Flask, render_template, request, redirect, session, url_for, flash
-from flask_login import LoginManager, login_user, logout_user, current_user
+from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_bcrypt import Bcrypt
-from flask_talisman import Talisman
 from forms import EntryForm, LoginForm, TransferForm, ChangePasswordForm
 from models import db, User, Transaction
 from flask_wtf.csrf import CSRFProtect
 
 app = Flask(__name__)
-talisman = Talisman(app)
+
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///bank.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-secret_key = os.environ.get("FLASK_SECRET_KEY", "default key")
-app.config['SECRET_KEY'] = secret_key
+app.config['SECRET_KEY'] = os.environ.get("FLASK_SECRET_KEY", "default key")
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=20)
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
 bcrypt = Bcrypt(app)
 db.init_app(app)
 login_manager = LoginManager(app)
-login_manager.login_view = 'entry'
+login_manager.login_view = 'index'
 csrf = CSRFProtect(app)
-
 login_attempts_memory = {}
 
 @login_manager.user_loader
@@ -46,41 +49,47 @@ def create_sample_users():
             db.session.commit()
 
 @app.before_request
-def before_request():
-    if not current_user.is_authenticated and request.endpoint and request.endpoint in ['index', 'other_protected_endpoint']:
-        return redirect(url_for('entry'))
+def check_session():
+    if session.get("user_id", None) is None:
+        return
+    if session.get("ip_address", None) != request.remote_addr:
+        session.pop("user_id", None)
+        logout_user()
+        return redirect(url_for("index"))
 
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def index():
-    with app.app_context():
-        return render_template('index.html', user=current_user)
-
-@app.route('/entry', methods=['GET', 'POST'])
-def entry():
     form = EntryForm()
+    
+    if current_user.is_authenticated:
+        return redirect(url_for('home'))
 
     if form.validate_on_submit():
         username = form.username.data
-        session['partial_password_username'] = username
+        session['username'] = username
         return redirect(url_for('login'))
     
-    return render_template('entry.html', form=form)
+    return render_template('index.html', form=form)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
 
+    if 'username' not in session:
+        return redirect(url_for('index'))
+    
+    if current_user.is_authenticated:
+        return redirect(url_for('home'))
+
     if form.validate_on_submit():
-        print("JESTEM TU")
         if form.honeypot.data:
             flash('Wystąpił błąd.', 'error')
             sleep(3)
             return redirect(url_for('login'))
         else:
             print("git")
-            username = session.get('partial_password_username')
+            username = session.get('username')
             password = form.password.data
-            print(username, password)
 
             if username not in login_attempts_memory:
                 login_attempts_memory[username] = 0
@@ -90,9 +99,9 @@ def login():
             if user and user.check_password(password):
                 login_user(user)
                 user.update_last_login()
-                session.pop('partial_password_username', None)
+                session.pop('username', None)
                 flash('Pomyślnie zalogowano.', 'success')
-                return redirect(url_for('index'))
+                return redirect(url_for('home'))
             else:
                 if login_attempts_memory[username] > 5:
                     sleep(10)
@@ -105,7 +114,13 @@ def login():
     sleep(1)
     return render_template('login.html', form=form)
 
+@app.route('/home', methods=['GET', 'POST'])
+@login_required
+def home(): 
+    return render_template('home.html', user=current_user)
+
 @app.route('/make_transfer', methods=['GET', 'POST'])
+@login_required
 def make_transfer():
     form = TransferForm()
 
@@ -136,7 +151,6 @@ def make_transfer():
                 db.session.commit()
 
                 flash('Przelew wykonany pomyślnie.', 'success')
-                return redirect(url_for('index'))
             else:
                 flash('Niewystarczające saldo na koncie.', 'error')
         else:
@@ -145,10 +159,12 @@ def make_transfer():
     return render_template('make_transfer.html', form=form)
 
 @app.route('/view_sensitive_data')
+@login_required
 def view_sensitive_data():
     return render_template('view_sensitive_data.html', user=current_user)
 
 @app.route('/view_transaction_list')
+@login_required
 def view_transaction_list():
     with app.app_context():
         # Pobierz transakcje wychodzące i przychodzące dla bieżącego użytkownika
@@ -157,11 +173,13 @@ def view_transaction_list():
     return render_template('view_transaction_list.html', out_trans=out_trans, in_trans=in_trans)
     
 @app.route('/logout')
+@login_required
 def logout():
     logout_user()
-    return redirect(url_for('login'))
+    return redirect(url_for('index'))
 
 @app.route('/change_password', methods=['GET', 'POST'])
+@login_required
 def change_password():
     form = ChangePasswordForm()
 
@@ -185,4 +203,4 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
         create_sample_users()
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000)

@@ -1,6 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
-from flask_bcrypt import generate_password_hash, check_password_hash
+import bcrypt
 from datetime import datetime
 
 db = SQLAlchemy()
@@ -17,10 +17,10 @@ class User(db.Model, UserMixin):
     last_login = db.Column(db.DateTime)
 
     def set_password(self, password):
-        self.password = generate_password_hash(password).decode('utf-8')
+        self.password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).hex()
 
     def check_password(self, password):
-        return check_password_hash(self.password, password)
+        return bcrypt.checkpw(password.encode('utf-8'), bytes.fromhex(self.password))
     
     def update_last_login(self):
         self.last_login = datetime.now()

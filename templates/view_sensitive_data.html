@@ -8,5 +8,5 @@
     <p><strong>Numer Karty: </strong> {{ user.card_number }}</p>
     <p><strong>Numer Dowodu: </strong> {{ user.id_number }}</p>
     <p><strong>Ostatnie logowanie: </strong> {{ user.last_login.strftime('%Y-%m-%d %H:%M:%S') }}</p>
-    <a href="{{ url_for('index') }}" class="button">Wróć do strony głównej</a>
+    <a href="{{ url_for('home') }}" class="button">Wróć do strony głównej</a>
 {% endblock %}

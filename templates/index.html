@@ -1,7 +1,19 @@
 {% extends 'base.html' %}
+
+{% block header %}Zaloguj się na stronę banku{% endblock %}
+
 {% block content %}
-    <h1>Witaj na stronie banku, {{user.username}}!</h1>
-    <a href="{{ url_for('make_transfer') }}" class="button">Wykonaj Przelew</a>
-    <a href="{{ url_for('view_transaction_list') }}" class="button">Zobacz Listę Przelewów</a>
-    <a href="{{ url_for('view_sensitive_data') }}" class="button">Zobacz Swoje Dane</a>
+    <form class="form" method="post" action="{{ url_for('index') }}">
+        {{ form.hidden_tag() }}
+        <label for="username"><strong>Nazwa użytkownika:</strong></label>
+        {{ form.username(class="form-control") }}
+        {% if form.username.errors %}
+            <p class="error-message">{{ form.username.errors[0] }}</p>
+        {% endif %}
+        <br>
+        {{ form.submit(class="button") }}
+    </form>
+    {% if error %}
+        <p class="error-message">{{ error }}</p>
+    {% endif %}
 {% endblock %}
