@@ -39,7 +39,6 @@ def create_sample_users():
         account_number = user_info['account_number']
         balance = user_info['balance']
 
-        # Sprawdź, czy użytkownik już istnieje w bazie danych
         user = User.query.filter_by(username=username).first()
 
         if not user:
@@ -130,22 +129,21 @@ def make_transfer():
         amount = form.amount.data
         title = form.title.data 
 
-        # Sprawdzenie, czy nie próbujemy wysłać przelewu do samego siebie
         if sender_account_number == recipient_account_number:
             flash('Nie można wysłać przelewu do własnego konta.', 'error')
             return redirect(url_for('make_transfer'))
+        
+        if amount <= 0:
+            flash('Kwota przelewu nie może być ujemna.', 'error')
+            return redirect(url_for('make_transfer'))
 
-        # Sprawdzenie, czy istnieje użytkownik o podanym numerze konta
         recipient_user = User.query.filter_by(account_number=recipient_account_number).first()
 
         if recipient_user:
-            # Sprawdzenie, czy saldo wystarcza na wykonanie przelewu
             if current_user.balance >= amount:
-                # Aktualizacja salda obu użytkowników
                 current_user.balance -= amount
                 recipient_user.balance += amount
 
-                # Zapisanie transakcji w bazie danych
                 transaction = Transaction(amount=amount, title=title, recipient_account_number=recipient_user.account_number, sender_account_number=sender_account_number, user=current_user)
                 db.session.add(transaction)
                 db.session.commit()
@@ -167,7 +165,6 @@ def view_sensitive_data():
 @login_required
 def view_transaction_list():
     with app.app_context():
-        # Pobierz transakcje wychodzące i przychodzące dla bieżącego użytkownika
         out_trans = Transaction.query.filter_by(user_id=current_user.id).all()
         in_trans = Transaction.query.filter_by(recipient_account_number=current_user.account_number).all()
     return render_template('view_transaction_list.html', out_trans=out_trans, in_trans=in_trans)
@@ -184,14 +181,15 @@ def change_password():
     form = ChangePasswordForm()
 
     if form.validate_on_submit():
-        # Sprawdzanie poprawności aktualnego hasła
+        
         if not current_user.check_password(form.current_password.data):
             flash('Błędne aktualne hasło.', 'error')
-            print(f'{current_user.password}')
-            print(f'{form.current_password.data}')
+            return redirect(url_for('change_password'))
+        
+        if form.current_password.data == form.new_password.data:
+            flash('Nowe hasło musi być inne niż obecne.', 'error')
             return redirect(url_for('change_password'))
 
-        # Aktualizacja hasła w bazie danych
         current_user.set_password(form.new_password.data)
         db.session.commit()
 

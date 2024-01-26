@@ -1,7 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 import bcrypt
-from datetime import datetime
+from datetime import datetime, timedelta
 
 db = SQLAlchemy()
 
@@ -14,7 +14,7 @@ class User(db.Model, UserMixin):
     account_number = db.Column(db.String(16), unique=True, nullable=False)
     balance = db.Column(db.Float, default=0.0)
     transfers = db.relationship('Transaction', backref='user', lazy=True)
-    last_login = db.Column(db.DateTime)
+    last_login = db.Column(db.DateTime, default=datetime.now() + timedelta(hours=1))
 
     def set_password(self, password):
         self.password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).hex()
@@ -23,7 +23,7 @@ class User(db.Model, UserMixin):
         return bcrypt.checkpw(password.encode('utf-8'), bytes.fromhex(self.password))
     
     def update_last_login(self):
-        self.last_login = datetime.now()
+        self.last_login = datetime.now() + timedelta(hours=1)
         db.session.commit()
 
 class Transaction(db.Model):

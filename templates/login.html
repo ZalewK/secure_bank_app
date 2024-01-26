@@ -3,7 +3,6 @@
 {% block header %}Zaloguj się na stronę banku{% endblock %}
 
 {% block content %}
-    <h2>Wprowadź te znaki swojego hasła: 1, 3, 4, 6, 8, 9</h2>
     <form class="form" method="post" action="{{ url_for('login') }}">
         {{ form.hidden_tag() }}
         <label for="password"><strong>Hasło:</strong></label>
