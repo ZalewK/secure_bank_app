@@ -12,7 +12,7 @@ class User(db.Model, UserMixin):
     card_number = db.Column(db.String(16), nullable=False)
     id_number = db.Column(db.String(10), nullable=False)
     account_number = db.Column(db.String(16), unique=True, nullable=False)
-    balance = db.Column(db.Float, default=0.0)
+    balance = db.Column(db.Integer, default=0.0)
     transfers = db.relationship('Transaction', backref='user', lazy=True)
     last_login = db.Column(db.DateTime, default=datetime.now() + timedelta(hours=1))
 

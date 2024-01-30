@@ -16,8 +16,8 @@ body {
 
 #content {
     max-width: 800px;
-    margin-top: 50px; /* Umieść content na samej górze strony */
-    margin-bottom: auto; /* Umieść content na samej górze strony */
+    margin-top: 50px;
+    margin-bottom: auto;
     padding: 20px;
     background-color: #fff;
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
