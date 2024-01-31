@@ -3,7 +3,7 @@
 {% block header %}Zaloguj się na stronę banku{% endblock %}
 
 {% block content %}
-    <form class="form" method="post" action="{{ url_for('login') }}">
+    <form class="form" method="post" action="{{ url_for('login', username=username) }}">
         {{ form.hidden_tag() }}
         <label for="password"><strong>Hasło:</strong></label>
         {{ form.password(class="form-control") }}

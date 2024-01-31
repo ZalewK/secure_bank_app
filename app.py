@@ -1,4 +1,5 @@
 from datetime import timedelta
+import math
 import os
 from users import users_data
 from time import sleep
@@ -6,7 +7,7 @@ from flask import Flask, render_template, request, redirect, session, url_for, f
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_bcrypt import Bcrypt
 from forms import EntryForm, LoginForm, TransferForm, ChangePasswordForm
-from models import db, User, Transaction
+from models import Combination, db, User, Transaction
 from flask_wtf.csrf import CSRFProtect
 
 app = Flask(__name__)
@@ -43,9 +44,14 @@ def create_sample_users():
 
         if not user:
             new_user = User(username=username, card_number=card_number, id_number=id_number, account_number=account_number, balance=balance)
-            new_user.set_password(password)
             db.session.add(new_user)
             db.session.commit()
+            new_user.set_password(password)
+
+def entropy(password):
+    char_set = set(password)
+    entropy = math.log2(len(char_set) ** len(password))
+    return entropy
 
 @app.before_request
 def check_session():
@@ -66,52 +72,57 @@ def index():
     if form.validate_on_submit():
         username = form.username.data
         session['username'] = username
-        return redirect(url_for('login'))
+        return redirect(url_for('login', username=username))
     
     return render_template('index.html', form=form)
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    form = LoginForm()
-
+@app.route('/login/<username>', methods=['GET', 'POST'])
+def login(username):
+    
     if 'username' not in session:
         return redirect(url_for('index'))
     
     if current_user.is_authenticated:
         return redirect(url_for('home'))
+    
+    combination = Combination.get_random_combination(username)
+    print(username)
+    print(combination.indexes)
+    print(combination.combination)
+    print(combination.id)
+    print(combination.user_id)
+    
+    form = LoginForm()
 
     if form.validate_on_submit():
         if form.honeypot.data:
             flash('Wystąpił błąd.', 'error')
-            sleep(3)
-            return redirect(url_for('login'))
+            #sleep(2)
+            return redirect(url_for('login', username=username))
         else:
-            print("git")
-            username = session.get('username')
             password = form.password.data
-
-            if username not in login_attempts_memory:
-                login_attempts_memory[username] = 0
-
             user = User.query.filter_by(username=username).first()
+            print(user)
+            print("haslo", password)
+            print("haslo decoded", password.encode("utf-8"))
+            print("Sprawdzanko", Combination.check_combination(combination.id, password))
 
-            if user and user.check_password(password):
+            if user and Combination.check_combination(combination.id, password):
                 login_user(user)
                 user.update_last_login()
                 session.pop('username', None)
                 flash('Pomyślnie zalogowano.', 'success')
                 return redirect(url_for('home'))
             else:
-                if login_attempts_memory[username] > 5:
-                    sleep(10)
-                    flash('Zbyt wiele nieudanych prób.', 'error')
-                    login_attempts_memory[username] = 0
-                    return redirect(url_for('index'))
+                #if login_attempts_memory[username] > 5:
+                    #sleep(10)
+                    #flash('Zbyt wiele nieudanych prób.', 'error')
+                    #login_attempts_memory[username] = 0
+                    #return redirect(url_for('index'))
                 flash('Nieprawidłowe dane logowania.', 'error')
-                login_attempts_memory[username] += 1
-                sleep(2)
-    sleep(1)
-    return render_template('login.html', form=form)
+                #sleep(2)
+    #sleep(1)
+    return render_template('login.html', form=form, username=username)
 
 @app.route('/home', methods=['GET', 'POST'])
 @login_required
@@ -179,7 +190,7 @@ def logout():
 @login_required
 def change_password():
     form = ChangePasswordForm()
-
+    sleep(2)
     if form.validate_on_submit():
         
         if not current_user.check_password(form.current_password.data):
@@ -189,11 +200,17 @@ def change_password():
         if form.current_password.data == form.new_password.data:
             flash('Nowe hasło musi być inne niż obecne.', 'error')
             return redirect(url_for('change_password'))
+        
+        if entropy(form.new_password.data) < 40:
+            flash((entropy(form.new_password.data), 'Nowe hasło jest zbyt słabe.'), 'error')
+            return redirect(url_for('change_password'))
 
-        current_user.set_password(form.new_password.data)
-        db.session.commit()
+        current_user.change_password(form.new_password.data)
 
         flash('Hasło zostało zmienione.', 'success')
+    else:
+        for error in form.errors:
+            flash(form.errors[error][0], 'error')
 
     return render_template('change_password.html', form=form)
 
@@ -201,4 +218,4 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
         create_sample_users()
-    app.run(host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
