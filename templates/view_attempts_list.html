@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <style>
+        .login-attempts {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+
+    <h2>Historia prób logowania na twoje konto</h2>
+    {% if attempts %}
+    <ul class="login-attempts">
+        {% for attempt in attempts|reverse %}
+        <li>Adres IP dla próby: {{ attempt.ip_address }}</li>
+        <li>Data próby logowania: {{ attempt.login_time.strftime('%Y-%m-%d %H:%M:%S') }}</li>
+        <li>Wynik próby logowania: {% if attempt.is_successful %}Sukces{% else %}Porażka{% endif %}</li>
+        <br />
+        {% endfor %}
+    </ul>
+    {% else %}
+        <p>Brak dostępnych prób logowania.</p>
+    {% endif %}
+    <a href="{{ url_for('home') }}" class="button">Wróć do strony głównej</a>
+{% endblock %}

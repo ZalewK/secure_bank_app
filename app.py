@@ -5,10 +5,9 @@ from users import users_data
 from time import sleep
 from flask import Flask, render_template, request, redirect, session, url_for, flash
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
-from flask_bcrypt import Bcrypt
 from forms import EntryForm, LoginForm, TransferForm, ChangePasswordForm
-from models import Combination, db, User, Transaction
-from flask_wtf.csrf import CSRFProtect
+from models import Combination, db, User, Transaction, Attempt
+from flask_wtf.csrf import CSRFProtect, CSRFError
 
 app = Flask(__name__)
 
@@ -20,12 +19,10 @@ app.config['SESSION_COOKIE_SECURE'] = True
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
-bcrypt = Bcrypt(app)
 db.init_app(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'index'
 csrf = CSRFProtect(app)
-login_attempts_memory = {}
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -53,14 +50,36 @@ def entropy(password):
     entropy = math.log2(len(char_set) ** len(password))
     return entropy
 
-@app.before_request
+def validate_ip(ip):
+    parts = ip.split(".")
+
+    if len(parts) != 4:
+        return False
+    
+    for part in parts:
+        try:
+            part_as_int = int(part)
+        except ValueError:
+            return False
+        
+        if part_as_int < 0 or part_as_int > 255:
+            return False
+    
+    return True
+
+def handle_logout():
+    session.pop("user_id", None)
+    logout_user()
+    return redirect(url_for("index"))
+
 def check_session():
     if session.get("user_id", None) is None:
         return
-    if session.get("ip_address", None) != request.remote_addr:
-        session.pop("user_id", None)
-        logout_user()
-        return redirect(url_for("index"))
+    if validate_ip(request.remote_addr):
+        if session.get("ip_address", None) != request.remote_addr:
+            handle_logout()
+    else:
+        handle_logout()
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -70,61 +89,67 @@ def index():
         return redirect(url_for('home'))
 
     if form.validate_on_submit():
-        username = form.username.data
-        session['username'] = username
-        return redirect(url_for('login', username=username))
+        sleep(2)
+        if form.honeypot.data:
+            flash('Dane są niepoprawne.', 'error')
+        else:
+            username = form.username.data
+            session['username'] = username
+            return redirect(url_for('login', username=username))
     
     return render_template('index.html', form=form)
 
 @app.route('/login/<username>', methods=['GET', 'POST'])
 def login(username):
-    
+    combination = Combination.get_random_combination(username)
+
     if 'username' not in session:
         return redirect(url_for('index'))
     
     if current_user.is_authenticated:
         return redirect(url_for('home'))
     
-    combination = Combination.get_random_combination(username)
-    print(username)
-    print(combination.indexes)
-    print(combination.combination)
-    print(combination.id)
-    print(combination.user_id)
-    
     form = LoginForm()
 
     if form.validate_on_submit():
+        sleep(2)
         if form.honeypot.data:
-            flash('Wystąpił błąd.', 'error')
-            #sleep(2)
-            return redirect(url_for('login', username=username))
+            flash('Dane są niepoprawne.', 'error') 
         else:
             password = form.password.data
             user = User.query.filter_by(username=username).first()
-            print(user)
-            print("haslo", password)
-            print("haslo decoded", password.encode("utf-8"))
-            print("Sprawdzanko", Combination.check_combination(combination.id, password))
+
+            if validate_ip(request.remote_addr):
+                client_ip = request.remote_addr
+            else:
+                handle_logout()
+
+            print("Nieudanych prób:", Attempt.count_failed_attempts(username, client_ip))
+            if Attempt.count_failed_attempts(username, client_ip):
+                Attempt.mark_login_attempt(username, client_ip, False)
+                flash('Zbyt dużo nieudanych prób logowania. Odczekaj 5 minut.', 'error')
+                return render_template('login.html', form=form, username=username, combination=combination)
 
             if user and Combination.check_combination(combination.id, password):
                 login_user(user)
                 user.update_last_login()
+
                 session.pop('username', None)
+                session["user_id"] = user.id
+                session["ip_address"] = client_ip
+
+                Attempt.mark_login_attempt(username, client_ip, True)
+                Attempt.mark_attempts_as_old(username, client_ip)
+
                 flash('Pomyślnie zalogowano.', 'success')
                 return redirect(url_for('home'))
             else:
-                #if login_attempts_memory[username] > 5:
-                    #sleep(10)
-                    #flash('Zbyt wiele nieudanych prób.', 'error')
-                    #login_attempts_memory[username] = 0
-                    #return redirect(url_for('index'))
-                flash('Nieprawidłowe dane logowania.', 'error')
-                #sleep(2)
+                Attempt.mark_login_attempt(username, client_ip, False)
+                flash('Dane są niepoprawne.', 'error')
     else:
-        print("WALIDACJA NIE")
-    #sleep(1)
-    return render_template('login.html', form=form, username=username)
+        for error in form.errors:
+            flash(form.errors[error][0], 'error')
+    return render_template('login.html', form=form, username=username, combination=combination)
 
 @app.route('/home', methods=['GET', 'POST'])
 @login_required
@@ -137,6 +162,7 @@ def make_transfer():
     form = TransferForm()
 
     if form.validate_on_submit():
+        sleep(2)
         sender_account_number = current_user.account_number
         recipient_account_number = form.recipient_account_number.data
         amount = form.amount.data
@@ -144,11 +170,11 @@ def make_transfer():
 
         if sender_account_number == recipient_account_number:
             flash('Nie można wysłać przelewu do własnego konta.', 'error')
-            return redirect(url_for('make_transfer'))
+            return render_template('make_transfer.html', form=form)
         
         if amount <= 0:
             flash('Kwota przelewu nie może być ujemna.', 'error')
-            return redirect(url_for('make_transfer'))
+            return render_template('make_transfer.html', form=form)
 
         recipient_user = User.query.filter_by(account_number=recipient_account_number).first()
 
@@ -157,9 +183,7 @@ def make_transfer():
                 current_user.balance -= amount
                 recipient_user.balance += amount
 
-                transaction = Transaction(amount=amount, title=title, recipient_account_number=recipient_user.account_number, sender_account_number=sender_account_number, user=current_user)
-                db.session.add(transaction)
-                db.session.commit()
+                Transaction.make_transaction(amount, title, recipient_user.account_number, sender_account_number, current_user.id)
 
                 flash('Przelew wykonany pomyślnie.', 'success')
             else:
@@ -173,6 +197,12 @@ def make_transfer():
 @login_required
 def view_sensitive_data():
     return render_template('view_sensitive_data.html', user=current_user)
+
+@app.route('/view_attempts_list')
+@login_required
+def view_attempts_list():
+    attempts = Attempt.query.filter_by(user_id=current_user.username)
+    return render_template('view_attempts_list.html', attempts=attempts)
 
 @app.route('/view_transaction_list')
 @login_required
@@ -192,20 +222,20 @@ def logout():
 @login_required
 def change_password():
     form = ChangePasswordForm()
-    sleep(2)
+    
     if form.validate_on_submit():
-        
+        sleep(2)
         if not current_user.check_password(form.current_password.data):
             flash('Błędne aktualne hasło.', 'error')
-            return redirect(url_for('change_password'))
+            return render_template('change_password.html', form=form)
         
         if form.current_password.data == form.new_password.data:
             flash('Nowe hasło musi być inne niż obecne.', 'error')
-            return redirect(url_for('change_password'))
+            return render_template('change_password.html', form=form)
         
         if entropy(form.new_password.data) < 40:
-            flash((entropy(form.new_password.data), 'Nowe hasło jest zbyt słabe.'), 'error')
-            return redirect(url_for('change_password'))
+            flash(('Nowe hasło musi mieć większą entropię.'), 'error')
+            return render_template('change_password.html', form=form)
 
         current_user.change_password(form.new_password.data)
 
@@ -215,6 +245,19 @@ def change_password():
             flash(form.errors[error][0], 'error')
 
     return render_template('change_password.html', form=form)
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    return render_template('csrf_error.html'), 400
+
+@app.errorhandler(404)
+def not_found(e):
+    return render_template('404_error.html'), 404
+
+def create_key():
+    import secrets
+    secret_key = secrets.token_hex(128)
+    return secret_key
 
 if __name__ == '__main__':
     with app.app_context():

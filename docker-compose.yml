@@ -5,6 +5,8 @@ services:
     build:
       context: .
     command: python wsgi.py
+    environment:
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
 
   nginx:
     image: nginx

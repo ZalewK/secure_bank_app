@@ -1,25 +1,42 @@
 {% extends 'base.html' %}
 
 {% block content %}
+    <style>
+        .transaction-list {
+            max-height: 100px;
+            overflow-y: auto;
+        }
+    </style>
+
     <h1>Twoja lista przelewów</h1>
     <h2>Przelewy wysłane:</h2>
-    <ul>
-        {% for transaction in out_trans %}
-        <li>Kwota przelewu: {{ transaction.amount }} PLN</li>
-        <li>Tytuł przelewu: {{ transaction.title }}</li>
-        <li>Konto odbiorcy: {{ transaction.recipient_account_number }}</li>
-        <br />
-        {% endfor %}
-    </ul>
+    {% if out_trans %}
+        <ul class="transaction-list">
+            {% for transaction in out_trans|reverse %}
+            <li>Kwota przelewu: {{ transaction.amount }} PLN</li>
+            <li>Tytuł przelewu: {{ transaction.title }}</li>
+            <li>Konto odbiorcy: {{ transaction.recipient_account_number }}</li>
+            <li>Data przelewu: {{ transaction.transaction_date.strftime('%Y-%m-%d %H:%M:%S') }}</li>
+            <br />
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>Brak przelewów wysłanych.</p>
+    {% endif %}
 
     <h2>Przelewy odebrane:</h2>
-    <ul>
-        {% for transaction in in_trans %}
-        <li>Kwota przelewu: {{ transaction.amount }} PLN</li>
-        <li>Tytuł przelewu: {{ transaction.title }}</li>
-        <li>Konto nadawcy: {{ transaction.sender_account_number }}</li>
-        <br />
-        {% endfor %}
-    </ul>
+    {% if in_trans %}
+        <ul class="transaction-list">
+            {% for transaction in in_trans|reverse %}
+            <li>Kwota przelewu: {{ transaction.amount }} PLN</li>
+            <li>Tytuł przelewu: {{ transaction.title }}</li>
+            <li>Konto nadawcy: {{ transaction.sender_account_number }}</li>
+            <li>Data przelewu: {{ transaction.transaction_date.strftime('%Y-%m-%d %H:%M:%S') }}</li>
+            <br />
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>Brak przelewów odebranych.</p>
+    {% endif %}
     <a href="{{ url_for('home') }}" class="button">Wróć do strony głównej</a>
 {% endblock %}

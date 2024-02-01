@@ -14,24 +14,21 @@ class User(db.Model, UserMixin):
     id_number = db.Column(db.String(10), nullable=False)
     account_number = db.Column(db.String(16), unique=True, nullable=False)
     balance = db.Column(db.Integer, default=0.0)
-    transfers = db.relationship('Transaction', backref='user', lazy=True)
-    password_combinations = db.relationship('Combination', backref='user', lazy=True)
     last_login = db.Column(db.DateTime, default=datetime.now())
 
     def set_password(self, password):
-        salt = bcrypt.gensalt()
-        self.password = bcrypt.hashpw(password.encode("utf-8"), salt).hex()
-        User.generate_password_combinations(password, salt, user_id=self.id)
+        self.password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).hex()
+        User.generate_password_combinations(password, user_id=self.id)
         db.session.commit()
 
     def check_password(self, password):
         return bcrypt.checkpw(password.encode('utf-8'), bytes.fromhex(self.password))
     
     def update_last_login(self):
-        self.last_login = datetime.now() + timedelta(hours=1)
+        self.last_login = datetime.now()
         db.session.commit()
 
-    def generate_password_combinations(password, salt, user_id):
+    def generate_password_combinations(password, user_id):
         password_length = len(password)
         combination_length = 5
         num_combinations = 10
@@ -42,7 +39,7 @@ class User(db.Model, UserMixin):
 
             combination = "".join([password[i - 1] for i in combination_indexes])
             print(combination.encode("utf-8"))
-            hashed_combination = bcrypt.hashpw(combination.encode("utf-8"), salt).hex()
+            hashed_combination = bcrypt.hashpw(combination.encode("utf-8"), bcrypt.gensalt()).hex()
             print(hashed_combination)
 
             used_indexes = ",".join(map(str, combination_indexes))
@@ -77,16 +74,28 @@ class Combination(db.Model):
     def activate_combination(self):
         self.activation_date = datetime.now()
 
+    def is_combination_active(id):
+        combination = Combination.query.get(id)
+        if combination.activation_date is not None:
+            if combination.activation_date > datetime.now() - timedelta(minutes=2):   
+                return True
+            else:
+                combination.activation_date = None
+                db.session.commit()
+                return False
+        else:
+            return False
+
     def get_random_combination(username):
         user = User.query.filter_by(username=username).first()
 
         if user:
             combinations = Combination.query.filter_by(user_id=user.id).all()
 
-        #active_credentials = [combination for combination in combinations if Combination.is_password_combination_active(combination.id)]
+        active_combinations = [combination for combination in combinations if Combination.is_combination_active(combination.id)]
 
-        #if len(active_credentials) > 0:
-            #return active_credentials[0]
+        if len(active_combinations) > 0:
+            return active_combinations[0]
 
         random_combination = random.choice(combinations)
         random_combination.activation_date = datetime.now()
@@ -94,27 +103,17 @@ class Combination(db.Model):
 
         return random_combination
     
-    #get_combination_indexes(combination):
-    
     def check_combination(id, password):
-        combination = Combination.query.where(Combination.id == id).first()
-        print(combination)
-        print(password)
-        print(password.encode('utf-8'))
-        print(bytes.fromhex(combination.combination))
-        print(combination.combination)
+        combination = Combination.query.get(id)
 
-        #is_combination_active = Combination.is_password_combination_active(combination_id)
-
-        #if not is_combination_active:
-        #    return False
+        if not Combination.is_combination_active(id):
+            return False
 
         if bcrypt.checkpw(password.encode("utf-8"), bytes.fromhex(combination.combination)):
             combination.activation_date = None
             db.session.commit()
             return True
         else:
-            print('nie zgadzaja sie')
             return False
 
 class Transaction(db.Model):
@@ -123,4 +122,56 @@ class Transaction(db.Model):
     title = db.Column(db.String(100), nullable=False)
     recipient_account_number = db.Column(db.String(50), nullable=False)
     sender_account_number = db.Column(db.String(50), nullable=False)
+    transaction_date = db.Column(db.DateTime, default=None, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    def make_transaction(amount, title, recipient_account_number, sender_account_number, current_user_id):
+        transaction = Transaction(amount=amount, 
+                                  title=title, 
+                                  recipient_account_number=recipient_account_number, 
+                                  sender_account_number=sender_account_number, 
+                                  transaction_date=datetime.now(), 
+                                  user_id=current_user_id)
+        db.session.add(transaction)
+        db.session.commit()
+
+class Attempt(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    ip_address = db.Column(db.String(60), nullable=False)
+    login_time = db.Column(db.DateTime, default=datetime.now())
+    is_successful = db.Column(db.Boolean, nullable=False)
+    is_old = db.Column(db.Boolean, default=False, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    def mark_login_attempt(user_id, ip_address, is_successful):
+        login_time = datetime.now()
+        login_attempt = Attempt(user_id=user_id, ip_address=ip_address, login_time=login_time, is_successful=is_successful)
+        db.session.add(login_attempt)
+        db.session.commit()
+
+    def count_failed_attempts(user_id, ip_address):
+        start_time = datetime.now() - timedelta(minutes=5)
+
+        failed_attempts = Attempt.query.filter(
+            Attempt.user_id == user_id,
+            Attempt.ip_address == ip_address,
+            Attempt.is_successful.is_(False),
+            Attempt.is_old.is_(False),
+            Attempt.login_time >= start_time
+        )
+        print("Nieudanych:", failed_attempts.count())
+
+        return failed_attempts.count() > 5
+    
+    def mark_attempts_as_old(user_id, ip_address):
+        login_attempts = Attempt.query.filter(
+            Attempt.user_id == user_id,
+            Attempt.ip_address == ip_address,
+            Attempt.is_old.is_(False)
+        )
+
+        for login_attempt in login_attempts:
+            login_attempt.is_old = True
+            db.session.add(login_attempt)
+
+        db.session.commit()
