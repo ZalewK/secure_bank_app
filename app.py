@@ -121,6 +121,8 @@ def login(username):
                     #return redirect(url_for('index'))
                 flash('Nieprawidłowe dane logowania.', 'error')
                 #sleep(2)
+    else:
+        print("WALIDACJA NIE")
     #sleep(1)
     return render_template('login.html', form=form, username=username)
 

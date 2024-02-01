@@ -8,8 +8,8 @@ db = SQLAlchemy()
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False)
-    password = db.Column(db.String(50), nullable=True)
+    username = db.Column(db.String(60), unique=True, nullable=False)
+    password = db.Column(db.String(60), nullable=True)
     card_number = db.Column(db.String(16), nullable=False)
     id_number = db.Column(db.String(10), nullable=False)
     account_number = db.Column(db.String(16), unique=True, nullable=False)
@@ -69,8 +69,8 @@ class User(db.Model, UserMixin):
 
 class Combination(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    combination = db.Column(db.String(55), nullable=False)
-    indexes = db.Column(db.String(55), nullable=False)
+    combination = db.Column(db.String(60), nullable=False)
+    indexes = db.Column(db.String(60), nullable=False)
     activation_date = db.Column(db.DateTime, default=None)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
@@ -102,6 +102,7 @@ class Combination(db.Model):
         print(password)
         print(password.encode('utf-8'))
         print(bytes.fromhex(combination.combination))
+        print(combination.combination)
 
         #is_combination_active = Combination.is_password_combination_active(combination_id)
 
@@ -110,7 +111,6 @@ class Combination(db.Model):
 
         if bcrypt.checkpw(password.encode("utf-8"), bytes.fromhex(combination.combination)):
             combination.activation_date = None
-            
             db.session.commit()
             return True
         else:
