@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <h2>Potwierdź dostęp do swoich danych:</h2>
+    <form class="form" method="post" action="{{ url_for('access_data') }}">
+        {{ form.hidden_tag() }}
+        <label for="password"><strong>Hasło:</strong></label>
+        {{ form.password(class="form-control") }}
+        <br>
+        {{ form.submit(class="button") }}
+    </form>
+{% endblock %}

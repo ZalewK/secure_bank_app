@@ -1,6 +1,10 @@
 import random
+import string
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
+from Crypto.Cipher import AES
+from Crypto.Protocol.KDF import PBKDF2
+from Crypto.Util.Padding import pad, unpad
 import bcrypt
 from datetime import datetime, timedelta
 
@@ -8,25 +12,78 @@ db = SQLAlchemy()
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(60), unique=True, nullable=False)
-    password = db.Column(db.String(60), nullable=True)
-    card_number = db.Column(db.String(16), nullable=False)
-    id_number = db.Column(db.String(10), nullable=False)
-    account_number = db.Column(db.String(16), unique=True, nullable=False)
-    balance = db.Column(db.Integer, default=0.0)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    password = db.Column(db.String(120), nullable=True)
+    card_number = db.Column(db.String(200), nullable=True)
+    id_number = db.Column(db.String(200), nullable=True)
+    account_number = db.Column(db.String(16), unique=True, nullable=True)
+    balance = db.Column(db.Integer, default=0, nullable=False)
     last_login = db.Column(db.DateTime, default=datetime.now())
+    salt_id = db.Column(db.Integer, db.ForeignKey("salt.id"))
 
-    def set_password(self, password):
-        self.password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).hex()
+    def set_user(self, password):
+        salt = Salt(salt=bcrypt.gensalt().decode('utf-8'))
+        db.session.add(salt)
+        db.session.commit()
+
+        self.salt_id = salt.id
+
+        self.password = bcrypt.hashpw(password.encode('utf-8'), salt.salt.encode('utf-8')).hex()
         User.generate_password_combinations(password, user_id=self.id)
         db.session.commit()
 
-    def check_password(self, password):
-        return bcrypt.checkpw(password.encode('utf-8'), bytes.fromhex(self.password))
-    
-    def update_last_login(self):
-        self.last_login = datetime.now()
+        key = User.generate_aes_key(password, salt.salt)
+
+        card_number = User.generate_random_card_number()
+        id_number = User.generate_random_id_number()
+        account_number = User.generate_random_account_number()
+
+        encrypted_card = User.encrypt_aes(card_number, key)
+        encrypted_id = User.encrypt_aes(id_number, key)
+
+        self.card_number = encrypted_card
+        self.id_number = encrypted_id
+        self.account_number = account_number
+
         db.session.commit()
+    
+    def generate_random_card_number():
+        return ''.join(random.choices(string.digits, k=16))
+
+    def generate_random_id_number():
+        letters = random.choices(string.ascii_uppercase, k=3)
+        numbers = ''.join(random.choices(string.digits, k=6))
+        return ''.join(letters) + numbers
+
+    def generate_random_account_number():
+        return ''.join(random.choices(string.digits, k=16))
+    
+    def generate_aes_key(password, salt):
+        key = PBKDF2(password, salt.encode("utf-8"))
+        return key
+    
+    def encrypt_aes(data, key):
+        cipher = AES.new(key, AES.MODE_CBC)
+        ciphertext = cipher.encrypt(pad(data.encode("utf-8"), AES.block_size))
+        return cipher.iv + ciphertext
+    
+    def decrypt_aes(data, key):
+        cipher = AES.new(key, AES.MODE_CBC, iv=data[:AES.block_size])
+        decrypted_data = unpad(cipher.decrypt(data[AES.block_size:]), AES.block_size)
+        return decrypted_data
+    
+    def decrypt_data(self, password):
+        salt_id = self.salt_id
+        salt = Salt.query.get(salt_id)
+        key = User.generate_aes_key(password, salt.salt)
+
+        decrypted_card = User.decrypt_aes(self.card_number, key)
+        decrypted_id = User.decrypt_aes(self.id_number, key)
+
+        return {
+            "card_number": decrypted_card.decode("utf-8"),
+            "id_number": decrypted_id.decode("utf-8")
+        }
 
     def generate_password_combinations(password, user_id):
         password_length = len(password)
@@ -38,18 +95,15 @@ class User(db.Model, UserMixin):
             combination_indexes.sort()
 
             combination = "".join([password[i - 1] for i in combination_indexes])
-            print(combination.encode("utf-8"))
             hashed_combination = bcrypt.hashpw(combination.encode("utf-8"), bcrypt.gensalt()).hex()
-            print(hashed_combination)
 
             used_indexes = ",".join(map(str, combination_indexes))
-            print(used_indexes)
 
             password_combination = Combination(combination=hashed_combination, indexes=used_indexes, user_id=user_id)
             db.session.add(password_combination)
         
         db.session.commit()
-    
+
     def delete_password_combinations(self):
         existing_combinations = Combination.query.filter_by(user_id=self.id).all()
 
@@ -57,12 +111,18 @@ class User(db.Model, UserMixin):
             db.session.delete(combination)
 
         db.session.commit()
+        
+    def check_password(self, password):
+        return bcrypt.checkpw(password.encode('utf-8'), bytes.fromhex(self.password))
     
     def change_password(self, password):
         self.delete_password_combinations()
-        self.set_password(password)
+        self.set_user(password)
         db.session.commit()
-
+    
+    def update_last_login(self):
+        self.last_login = datetime.now()
+        db.session.commit()
 
 class Combination(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -77,7 +137,7 @@ class Combination(db.Model):
     def is_combination_active(id):
         combination = Combination.query.get(id)
         if combination.activation_date is not None:
-            if combination.activation_date > datetime.now() - timedelta(minutes=2):   
+            if combination.activation_date > datetime.now() - timedelta(minutes=5):   
                 return True
             else:
                 combination.activation_date = None
@@ -89,19 +149,27 @@ class Combination(db.Model):
     def get_random_combination(username):
         user = User.query.filter_by(username=username).first()
 
-        if user:
+        if user is None:
+            dummy_combination = Combination.generate_dummy_combination(username)
+            return dummy_combination
+        else:
             combinations = Combination.query.filter_by(user_id=user.id).all()
+            active_combinations = [combination for combination in combinations if Combination.is_combination_active(combination.id)]
 
-        active_combinations = [combination for combination in combinations if Combination.is_combination_active(combination.id)]
-
-        if len(active_combinations) > 0:
-            return active_combinations[0]
-
-        random_combination = random.choice(combinations)
-        random_combination.activation_date = datetime.now()
-        db.session.commit()
-
-        return random_combination
+            if not active_combinations:
+                random_combination = random.choice(combinations)
+                random_combination.activation_date = datetime.now()
+                db.session.commit()
+                return random_combination
+            else:
+                return active_combinations[0]
+            
+    def generate_dummy_combination(username):
+        hashed_combination = bcrypt.hashpw("dummy".encode("utf-8"), bcrypt.gensalt()).hex()
+        seed_value = hash(username)
+        random.seed(seed_value)
+        used_indexes = ",".join(map(str, sorted(random.sample(range(1, 9), 5))))
+        return Combination(combination=hashed_combination, indexes=used_indexes, user_id=None)
     
     def check_combination(id, password):
         combination = Combination.query.get(id)
@@ -159,9 +227,8 @@ class Attempt(db.Model):
             Attempt.is_old.is_(False),
             Attempt.login_time >= start_time
         )
-        print("Nieudanych:", failed_attempts.count())
 
-        return failed_attempts.count() > 5
+        return failed_attempts.count() >= 5
     
     def mark_attempts_as_old(user_id, ip_address):
         login_attempts = Attempt.query.filter(
@@ -175,3 +242,7 @@ class Attempt(db.Model):
             db.session.add(login_attempt)
 
         db.session.commit()
+
+class Salt(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    salt = db.Column(db.String(60), nullable=False)

@@ -6,7 +6,9 @@ services:
       context: .
     command: python wsgi.py
     environment:
-      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+    networks:
+      - my_network
 
   nginx:
     image: nginx
@@ -19,3 +21,9 @@ services:
       - "443:443"
     depends_on:
       - flask-app
+    networks:
+      - my_network
+
+networks:
+  my_network:
+    driver: bridge

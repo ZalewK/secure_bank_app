@@ -27,14 +27,21 @@ class LoginForm(FlaskForm):
     honeypot = HiddenField()
     submit = SubmitField('Zaloguj się')
 
+class AccessForm(FlaskForm):
+    password = PasswordField('Password', validators=[DataRequired(), Length(8, 16), Regexp(safe_password, message=safe_password_message)])
+    honeypot = HiddenField()
+    submit = SubmitField('Zatwierdź')
+
 class TransferForm(FlaskForm):
     amount = IntegerField('Amount', validators=[DataRequired(message="Kwota przelewu musi być liczbą naturalną."), NumberRange(min=1, max=1000000)])
     title = StringField('Title', validators=[DataRequired(), Length(1, 100), Regexp(safe_transaction_title, message=safe_account_number_message)])
     recipient_account_number = StringField('Recipient Account Number', validators=[DataRequired(), Length(16, 16), Regexp(safe_account_number, message=safe_account_number_message)])
+    honeypot = HiddenField()
     submit = SubmitField('Wykonaj przelew')
 
 class ChangePasswordForm(FlaskForm):
     current_password = PasswordField('Aktualne hasło', validators=[DataRequired(), Length(8, 16), Regexp(safe_password, message=current_password_message)])
     new_password = PasswordField('Nowe hasło', validators=[DataRequired(), Length(8, 16), Regexp(safe_password, message=new_password_message)])
     confirm_password = PasswordField('Potwierdź nowe hasło', validators=[DataRequired(), Length(8, 16), Regexp(safe_password, message=confirm_password_message), EqualTo('new_password', message="Hasła muszą się zgadzać.")])
+    honeypot = HiddenField()
     submit = SubmitField('Zmień hasło')

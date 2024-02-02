@@ -1,19 +1,23 @@
 from datetime import timedelta
 import math
 import os
+import re
+from dotenv import load_dotenv
 from users import users_data
 from time import sleep
 from flask import Flask, render_template, request, redirect, session, url_for, flash
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
-from forms import EntryForm, LoginForm, TransferForm, ChangePasswordForm
+from flask_talisman import Talisman
+from forms import AccessForm, EntryForm, LoginForm, TransferForm, ChangePasswordForm
 from models import Combination, db, User, Transaction, Attempt
 from flask_wtf.csrf import CSRFProtect, CSRFError
+
+load_dotenv()
 
 app = Flask(__name__)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///bank.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.environ.get("FLASK_SECRET_KEY", "default key")
+app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", "default key")
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=20)
 app.config['SESSION_COOKIE_SECURE'] = True
 app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -22,7 +26,9 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 db.init_app(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'index'
+login_manager.login_message = "Proszę zalogować się, aby uzyskać dostęp do strony."
 csrf = CSRFProtect(app)
+talisman = Talisman(app)
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -32,18 +38,15 @@ def create_sample_users():
     for user_info in users_data:
         username = user_info['username']
         password = user_info['password']
-        card_number = user_info['card_number']
-        id_number = user_info['id_number']
-        account_number = user_info['account_number']
         balance = user_info['balance']
 
         user = User.query.filter_by(username=username).first()
 
         if not user:
-            new_user = User(username=username, card_number=card_number, id_number=id_number, account_number=account_number, balance=balance)
+            new_user = User(username=username, balance=balance)
             db.session.add(new_user)
             db.session.commit()
-            new_user.set_password(password)
+            new_user.set_user(password)
 
 def entropy(password):
     char_set = set(password)
@@ -72,6 +75,7 @@ def handle_logout():
     logout_user()
     return redirect(url_for("index"))
 
+@app.before_request
 def check_session():
     if session.get("user_id", None) is None:
         return
@@ -96,12 +100,16 @@ def index():
             username = form.username.data
             session['username'] = username
             return redirect(url_for('login', username=username))
+    else:
+        sleep(2)
     
     return render_template('index.html', form=form)
 
 @app.route('/login/<username>', methods=['GET', 'POST'])
 def login(username):
-    combination = Combination.get_random_combination(username)
+    if not re.match("^[a-zA-Z0-9_-]{4,50}$", username):
+        session.pop("username", None)
+        return redirect(url_for('index'))
 
     if 'username' not in session:
         return redirect(url_for('index'))
@@ -109,6 +117,8 @@ def login(username):
     if current_user.is_authenticated:
         return redirect(url_for('home'))
     
+    combination = Combination.get_random_combination(username)
+
     form = LoginForm()
 
     if form.validate_on_submit():
@@ -116,6 +126,9 @@ def login(username):
         if form.honeypot.data:
             flash('Dane są niepoprawne.', 'error') 
         else:
+            if(combination.user_id == None):
+                flash('Dane są niepoprawne.', 'error')
+                return render_template('login.html', form=form, username=username, combination=combination)
             password = form.password.data
             user = User.query.filter_by(username=username).first()
 
@@ -124,7 +137,6 @@ def login(username):
             else:
                 handle_logout()
 
-            print("Nieudanych prób:", Attempt.count_failed_attempts(username, client_ip))
             if Attempt.count_failed_attempts(username, client_ip):
                 Attempt.mark_login_attempt(username, client_ip, False)
                 flash('Zbyt dużo nieudanych prób logowania. Odczekaj 5 minut.', 'error')
@@ -147,6 +159,7 @@ def login(username):
                 Attempt.mark_login_attempt(username, client_ip, False)
                 flash('Dane są niepoprawne.', 'error')
     else:
+        sleep(2)
         for error in form.errors:
             flash(form.errors[error][0], 'error')
     return render_template('login.html', form=form, username=username, combination=combination)
@@ -163,40 +176,75 @@ def make_transfer():
 
     if form.validate_on_submit():
         sleep(2)
-        sender_account_number = current_user.account_number
-        recipient_account_number = form.recipient_account_number.data
-        amount = form.amount.data
-        title = form.title.data 
-
-        if sender_account_number == recipient_account_number:
-            flash('Nie można wysłać przelewu do własnego konta.', 'error')
-            return render_template('make_transfer.html', form=form)
-        
-        if amount <= 0:
-            flash('Kwota przelewu nie może być ujemna.', 'error')
-            return render_template('make_transfer.html', form=form)
-
-        recipient_user = User.query.filter_by(account_number=recipient_account_number).first()
-
-        if recipient_user:
-            if current_user.balance >= amount:
-                current_user.balance -= amount
-                recipient_user.balance += amount
-
-                Transaction.make_transaction(amount, title, recipient_user.account_number, sender_account_number, current_user.id)
-
-                flash('Przelew wykonany pomyślnie.', 'success')
-            else:
-                flash('Niewystarczające saldo na koncie.', 'error')
+        if form.honeypot.data:
+            flash('Dane są niepoprawne.', 'error')
         else:
-            flash('Użytkownik o podanym numerze konta nie istnieje.', 'error')
+            sender_account_number = current_user.account_number
+            recipient_account_number = form.recipient_account_number.data
+            amount = form.amount.data
+            title = form.title.data 
+
+            if sender_account_number == recipient_account_number:
+                flash('Nie można wysłać przelewu do własnego konta.', 'error')
+                return render_template('make_transfer.html', form=form)
+            
+            if amount <= 0:
+                flash('Kwota przelewu nie może być ujemna.', 'error')
+                return render_template('make_transfer.html', form=form)
+
+            recipient_user = User.query.filter_by(account_number=recipient_account_number).first()
+
+            if recipient_user:
+                if current_user.balance >= amount:
+                    current_user.balance -= amount
+                    recipient_user.balance += amount
+
+                    Transaction.make_transaction(amount, title, recipient_user.account_number, sender_account_number, current_user.id)
+
+                    flash('Przelew wykonany pomyślnie.', 'success')
+                else:
+                    flash('Niewystarczające saldo na koncie.', 'error')
+            else:
+                flash('Użytkownik o podanym numerze konta nie istnieje.', 'error')
+    else:
+        sleep(2)
 
     return render_template('make_transfer.html', form=form)
+
+@app.route('/access_data', methods=['GET', 'POST'])
+@login_required
+def access_data():
+    form = AccessForm()
+
+    if form.validate_on_submit():
+        sleep(2)
+        if form.honeypot.data:
+            flash('Dane są niepoprawne.', 'error')
+        else:
+            password = form.password.data
+            if current_user.check_password(password):
+                decrypted_data = current_user.decrypt_data(password)
+                session['decrypted_data'] = decrypted_data
+                return redirect(url_for('view_sensitive_data'))
+            else:
+                flash('Dane są niepoprawne.', 'error')
+    else:
+        sleep(2)
+        for error in form.errors:
+            flash(form.errors[error][0], 'error')
+
+    return render_template('access_data.html', form=form)
 
 @app.route('/view_sensitive_data')
 @login_required
 def view_sensitive_data():
-    return render_template('view_sensitive_data.html', user=current_user)
+    decrypted_data = session.pop('decrypted_data', None)
+    if decrypted_data is not None:
+        card_number = decrypted_data.get('card_number')
+        id_number = decrypted_data.get('id_number')
+        return render_template('view_sensitive_data.html', user=current_user, card_number=card_number, id_number=id_number)
+    else:
+        return redirect(url_for('home'))
 
 @app.route('/view_attempts_list')
 @login_required
@@ -225,22 +273,26 @@ def change_password():
     
     if form.validate_on_submit():
         sleep(2)
-        if not current_user.check_password(form.current_password.data):
-            flash('Błędne aktualne hasło.', 'error')
-            return render_template('change_password.html', form=form)
-        
-        if form.current_password.data == form.new_password.data:
-            flash('Nowe hasło musi być inne niż obecne.', 'error')
-            return render_template('change_password.html', form=form)
-        
-        if entropy(form.new_password.data) < 40:
-            flash(('Nowe hasło musi mieć większą entropię.'), 'error')
-            return render_template('change_password.html', form=form)
+        if form.honeypot.data:
+            flash('Dane są niepoprawne.', 'error')
+        else:
+            if not current_user.check_password(form.current_password.data):
+                flash('Błędne aktualne hasło.', 'error')
+                return render_template('change_password.html', form=form)
+            
+            if form.current_password.data == form.new_password.data:
+                flash('Nowe hasło musi być inne niż obecne.', 'error')
+                return render_template('change_password.html', form=form)
+            
+            if entropy(form.new_password.data) < 40:
+                flash(('Nowe hasło jest zbyt słabe - musi ono mieć większą entropię.'), 'error')
+                return render_template('change_password.html', form=form)
 
-        current_user.change_password(form.new_password.data)
+            current_user.change_password(form.new_password.data)
 
-        flash('Hasło zostało zmienione.', 'success')
+            flash('Hasło zostało zmienione.', 'success')
     else:
+        sleep(2)
         for error in form.errors:
             flash(form.errors[error][0], 'error')
 
@@ -254,10 +306,9 @@ def handle_csrf_error(e):
 def not_found(e):
     return render_template('404_error.html'), 404
 
-def create_key():
-    import secrets
-    secret_key = secrets.token_hex(128)
-    return secret_key
+@app.errorhandler(405)
+def not_allowed(e):
+    return render_template('405_error.html'), 405
 
 if __name__ == '__main__':
     with app.app_context():
